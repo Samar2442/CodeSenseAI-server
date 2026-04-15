@@ -7,83 +7,138 @@ const GROQ_KEY = process.env.GROQ_API_KEY;
 
 let groq: Groq | null = null;
 if (GROQ_KEY && GROQ_KEY.trim() !== '') {
-  groq = new Groq({
-    apiKey: GROQ_KEY,
-  });
+  groq = new Groq({ apiKey: GROQ_KEY });
 }
 
-export const analyzeCode = async (code: string, language: string) => {
-  console.log("--> Request received for AI Analysis");
+const FALLBACK_RESPONSE = {
+  score: 55,
+  issues: [
+    {
+      type: "bug",
+      severity: "medium",
+      title: "AI Analysis Unavailable",
+      description: "GROQ_API_KEY is missing or invalid. Using fallback mode.",
+      suggestion: "Add a valid GROQ_API_KEY to your .env file to enable real AI analysis."
+    }
+  ],
+  optimizedCode: null,
+  explanation: "AI analysis is currently unavailable. Please check your API configuration."
+};
 
+export const analyzeCode = async (code: string, language: string) => {
   if (!groq) {
-    console.log("⚠️ GROQ_API_KEY missing - Returning fallback response");
-    return {
-      score: 60,
-      issues: [
-        {
-          type: "bug",
-          severity: "medium",
-          title: "AI Fallback Mode",
-          description: "GROQ_API_KEY is missing in your .env file. Returning mock fallback.",
-          suggestion: "Add GROQ_API_KEY=your_key to your .env file to enable real analysis."
-        }
-      ]
-    };
+    console.log("⚠️ GROQ unavailable - returning fallback");
+    return FALLBACK_RESPONSE;
   }
 
   try {
-    console.log("--> Dispatching GROQ analysis...");
-
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile", // Updated to actively supported model
+      model: "llama-3.3-70b-versatile",
       messages: [
         {
           role: "system",
-          content: `You are a Senior Software Architect and Security Expert.
-Analyze the following ${language} code and return STRICT JSON:
+          content: `You are a Senior Software Architect and Security Expert specializing in ${language}.
+Analyze the following code and return ONLY valid JSON (no markdown, no explanation outside JSON):
 
 {
-  "score": number,
+  "score": <0-100 integer representing code quality>,
   "issues": [
     {
-      "type": "bug" | "security" | "optimization",
+      "type": "bug" | "security" | "optimization" | "style",
       "severity": "low" | "medium" | "high" | "critical",
-      "title": string,
-      "description": string,
-      "suggestion": string
+      "title": "<short title>",
+      "description": "<detailed description of the issue>",
+      "suggestion": "<specific actionable fix or improved code snippet>"
     }
-  ]
-}`
+  ],
+  "optimizedCode": "<complete optimized version of the code, or null if no optimization needed>",
+  "explanation": "<2-3 sentence high-level summary of the code quality and main findings>"
+}
+
+Be thorough. Look for: null pointer exceptions, SQL injection, XSS vulnerabilities, inefficient algorithms, memory leaks, security holes, bad practices, and code style issues.`
         },
-        {
-          role: "user",
-          content: code
-        }
+        { role: "user", content: code }
       ],
-      temperature: 0.3,
+      temperature: 0.2,
+      max_tokens: 4096,
     });
 
     const content = response.choices[0]?.message?.content || "{}";
-
-    console.log("--> GROQ Response received");
-
-    return JSON.parse(content);
-
-  } catch (error: any) {
-    console.error("GROQ ERROR:", error.message);
-
-    // ✅ fallback (no crash)
+    
+    // Strip markdown code fences if present
+    const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    
+    const parsed = JSON.parse(cleaned);
     return {
-      score: 60,
-      issues: [
-        {
-          type: "bug",
-          severity: "medium",
-          title: "AI Fallback Mode",
-          description: "AI failed, returning fallback response.",
-          suggestion: "Check API key or rate limits."
-        }
-      ]
+      score: parsed.score || 50,
+      issues: parsed.issues || [],
+      optimizedCode: parsed.optimizedCode || null,
+      explanation: parsed.explanation || null,
     };
+  } catch (error: any) {
+    console.error("GROQ Analysis Error:", error.message);
+    return FALLBACK_RESPONSE;
+  }
+};
+
+export const chatWithAI = async (
+  message: string,
+  code: string | undefined,
+  language: string | undefined,
+  history: Array<{ role: string; content: string }>
+): Promise<string> => {
+  if (!groq) {
+    return "AI assistant is currently unavailable. Please check your API configuration.";
+  }
+
+  try {
+    const systemMessage = `You are CodeSense AI, an expert code assistant and software architect. 
+You help developers understand, debug, and improve their code.
+${code ? `The user has shared the following ${language || ''} code for context:\n\`\`\`${language || ''}\n${code.slice(0, 3000)}\n\`\`\`` : ''}
+
+Respond concisely and helpfully. Use markdown formatting for code snippets.`;
+
+    const messages: any[] = [
+      { role: "system", content: systemMessage },
+      ...history.slice(-10).map(h => ({ role: h.role, content: h.content })),
+      { role: "user", content: message }
+    ];
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages,
+      temperature: 0.5,
+      max_tokens: 1024,
+    });
+
+    return response.choices[0]?.message?.content || "I couldn't generate a response. Please try again.";
+  } catch (error: any) {
+    console.error("Chat Error:", error.message);
+    return "I encountered an error processing your request. Please try again.";
+  }
+};
+
+export const detectLanguage = async (code: string): Promise<string> => {
+  if (!groq) return "javascript";
+
+  try {
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: "You are a programming language detector. Respond with ONLY the lowercase language name (e.g., javascript, python, typescript, go, java, rust, cpp, csharp, php, ruby). No explanation."
+        },
+        { role: "user", content: `Detect the programming language of:\n${code.slice(0, 500)}` }
+      ],
+      temperature: 0.1,
+      max_tokens: 20,
+    });
+
+    const lang = response.choices[0]?.message?.content?.trim().toLowerCase() || 'javascript';
+    const supported = ['javascript', 'typescript', 'python', 'go', 'java', 'rust', 'cpp', 'csharp', 'php', 'ruby'];
+    return supported.includes(lang) ? lang : 'javascript';
+  } catch {
+    return "javascript";
   }
 };
