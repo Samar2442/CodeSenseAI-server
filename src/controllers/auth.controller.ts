@@ -116,7 +116,7 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 };
 
-export const getMe = async (req: Request & { user?: { userId: string } }, res: Response) => {
+export const getMe = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
@@ -140,3 +140,19 @@ export const getMe = async (req: Request & { user?: { userId: string } }, res: R
     res.status(500).json({ message: 'Failed to fetch user data.' });
   }
 };
+
+export const oauthCallback = async (req: Request, res: Response) => {
+  // Passport puts the authenticated user in req.user
+  if (!req.user) {
+    return res.status(401).json({ message: 'OAuth Authentication Failed' });
+  }
+  
+  const user = req.user as any;
+  const { accessToken, refreshToken } = generateTokens(user.id);
+  
+  // In a real app, you would redirect back to the client app with the token
+  // For API context, if this is called via popup/redirect, we redirect to client
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+  res.redirect(`${clientUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`);
+};
+

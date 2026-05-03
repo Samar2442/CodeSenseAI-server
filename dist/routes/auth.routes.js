@@ -32,11 +32,24 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const passport_1 = __importDefault(require("passport"));
 const AuthController = __importStar(require("../controllers/auth.controller"));
+const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
+// Local Auth
 router.post('/register', AuthController.register);
 router.post('/login', AuthController.login);
-// OAuth routes will be added here
+router.post('/refresh', AuthController.refreshToken);
+router.get('/me', auth_middleware_1.authMiddleware, AuthController.getMe);
+// OAuth Google
+router.get('/google', passport_1.default.authenticate('google', { scope: ['profile', 'email'], session: false }));
+router.get('/google/callback', passport_1.default.authenticate('google', { session: false, failureRedirect: '/login' }), AuthController.oauthCallback);
+// OAuth GitHub
+router.get('/github', passport_1.default.authenticate('github', { scope: ['user:email'], session: false }));
+router.get('/github/callback', passport_1.default.authenticate('github', { session: false, failureRedirect: '/login' }), AuthController.oauthCallback);
 exports.default = router;

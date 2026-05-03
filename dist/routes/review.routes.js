@@ -40,4 +40,7 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authMiddleware);
 router.post('/code-review', ReviewController.createReview);
 router.get('/history', ReviewController.getHistory);
+router.get('/history/:id', ReviewController.getReviewById);
+router.post('/chat', ReviewController.chatWithCode);
+router.get('/analytics', ReviewController.getAnalytics);
 exports.default = router;
